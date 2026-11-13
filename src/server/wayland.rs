@@ -867,7 +867,9 @@ pub(super) fn get_capturer_for_display(
                 height: rect.2,
                 ndisplay: cap_display_info.num,
                 current: cap_display_info.current,
-                privacy_mode_id: 0,
+                // The video service restarts the capturer whenever this differs from the current owner.
+                privacy_mode_id: crate::privacy_mode::get_privacy_mode_conn_id()
+                    .unwrap_or(crate::privacy_mode::INVALID_PRIVACY_MODE_CONN_ID),
                 _capturer_privacy_mode_id: 0,
                 capturer: Box::new(cap_display_info.capturer.clone()),
             })
