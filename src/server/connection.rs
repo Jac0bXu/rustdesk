@@ -5333,6 +5333,8 @@ impl Connection {
             privacy_mode::macos::turn_off_before_lock(self.inner.id());
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             lock_screen().await;
+            #[cfg(target_os = "linux")]
+            privacy_mode::linux_wayland::wait_locked_before_turn_off(self.inner.id()).await;
         }
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         let data = if self.chat_unanswered || self.file_transferred && cfg!(feature = "flutter") {

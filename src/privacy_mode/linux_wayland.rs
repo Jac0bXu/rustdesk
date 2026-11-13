@@ -32,6 +32,8 @@ const GAMMA_REAPPLY_INTERVAL: Duration = Duration::from_millis(500);
 /// Consecutive failed re-applies after which the monitors may be visible, so the session ends.
 const GAMMA_MAX_FAILURES: u32 = 2;
 const LOG_INTERVAL: Duration = Duration::from_secs(60);
+const LOCK_WAIT: Duration = Duration::from_secs(3);
+const LOCK_POLL: Duration = Duration::from_millis(50);
 
 type Ramps = (Vec<u16>, Vec<u16>, Vec<u16>);
 
@@ -72,6 +74,49 @@ pub fn recover() {
     match res {
         Ok(()) => log::info!("Restored the monitors left in privacy mode by a previous run"),
         Err(e) => log::error!("Failed to restore the monitors from privacy mode: {}", e),
+    }
+}
+
+/// At session end, `lock_screen()` only injects Super+L and GNOME raises the lock screen about
+/// 0.7 s later; turning privacy mode off before that would show the unlocked desktop. Waits for
+/// GNOME to report the lock screen active when `conn_id` owns this privacy mode.
+pub async fn wait_locked_before_turn_off(conn_id: i32) {
+    if super::get_privacy_mode_conn_id() != Some(conn_id)
+        || !super::is_current_privacy_mode_impl(PRIVACY_MODE_IMPL)
+    {
+        return;
+    }
+    let locked = tokio::task::spawn_blocking(|| wait_screen_locked(LOCK_WAIT))
+        .await
+        .unwrap_or(false);
+    if !locked {
+        log::warn!(
+            "The screen did not report locked within {:?} before privacy mode ended",
+            LOCK_WAIT
+        );
+    }
+}
+
+fn wait_screen_locked(timeout: Duration) -> bool {
+    let Ok(conn) = dbus::blocking::Connection::new_session() else {
+        return false;
+    };
+    let proxy = conn.with_proxy(
+        "org.gnome.ScreenSaver",
+        "/org/gnome/ScreenSaver",
+        DBUS_TIMEOUT,
+    );
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let active: Result<(bool,), _> =
+            proxy.method_call("org.gnome.ScreenSaver", "GetActive", ());
+        if let Ok((true,)) = active {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(LOCK_POLL);
     }
 }
 
